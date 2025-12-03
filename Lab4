@@ -1,0 +1,366 @@
+from random import uniform
+import matplotlib.pyplot as plt
+import numpy as np
+
+def mse(outputs, targets):
+    error = 0
+    for i, output in enumerate(outputs):
+        error += (output - targets[i]) ** 2
+    return error / len(outputs)
+
+def r_squared(outputs, targets):
+    """Коэффициент детерминации R²"""
+    ss_res = sum((t - o) ** 2 for t, o in zip(targets, outputs))
+    ss_tot = sum((t - np.mean(targets)) ** 2 for t in targets)
+    return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+
+class LinearRegression:
+    def __init__(self, features_num):
+        # Инициализация весов небольшими случайными значениями
+        # Последний вес - bias (свободный член)
+        self.weights = [uniform(-1, 1) for _ in range(features_num + 1)]
+        self.features_num = features_num
+        
+    def forward(self, input_features):
+        """Прямой проход: вычисление прогноза"""
+        output = 0
+        for i, feature in enumerate(input_features):
+            output += self.weights[i] * feature
+        output += self.weights[-1]  # bias
+        return output
+    
+    def train(self, inp, output, target, samples_num, lr):
+        """Одно обновление весов методом градиентного спуска"""
+        for j in range(self.features_num):
+            self.weights[j] -= lr * (2 / samples_num) * (output - target) * inp[j]
+        
+        # Обновление bias
+        self.weights[-1] -= lr * (2 / samples_num) * (output - target)
+    
+    def fit(self, inputs, targets, epochs=1000, lr=0.01, verbose=True):
+        """Обучение модели"""
+        errors = []
+        r_squared_values = []
+        
+        for epoch in range(epochs):
+            outputs = []
+            
+            for i, inp in enumerate(inputs):
+                output = self.forward(inp)
+                outputs.append(output)
+                self.train(inp, output, targets[i], len(inputs), lr)
+            
+            error = mse(outputs, targets)
+            errors.append(error)
+            r2 = r_squared(outputs, targets)
+            r_squared_values.append(r2)
+            
+            if verbose and (epoch % 100 == 0 or epoch == epochs - 1):
+                print(f"Эпоха: {epoch:4d}, MSE: {error:.6f}, R²: {r2:.4f}")
+        
+        return errors, r_squared_values
+    
+    def predict(self, inputs):
+        """Прогнозирование для новых данных"""
+        predictions = []
+        for inp in inputs:
+            predictions.append(self.forward(inp))
+        return predictions
+    
+    def get_equation(self):
+        """Получение уравнения регрессии в читаемом виде"""
+        equation = f"Y = {self.weights[-1]:.4f}"
+        for i in range(self.features_num):
+            sign = "+" if self.weights[i] >= 0 else "-"
+            equation += f" {sign} {abs(self.weights[i]):.4f}*X{i+1}"
+        return equation
+
+def normalize_data(data):
+    """Нормализация данных (z-score normalization)"""
+    mean = np.mean(data)
+    std = np.std(data)
+    if std == 0:
+        return [0 for _ in data]
+    return [(x - mean) / std for x in data]
+
+def analyze_significance(model, inputs, targets):
+    """Анализ значимости факторов"""
+    print("\n" + "="*60)
+    print("АНАЛИЗ ЗНАЧИМОСТИ МОДЕЛИ")
+    print("="*60)
+    
+    # Предсказания модели
+    predictions = model.predict(inputs)
+    
+    # Суммы квадратов
+    ss_total = sum((t - np.mean(targets)) ** 2 for t in targets)
+    ss_residual = sum((t - p) ** 2 for t, p in zip(targets, predictions))
+    ss_regression = ss_total - ss_residual
+    
+    # Степени свободы
+    n = len(targets)
+    k = model.features_num
+    
+    # Средние квадраты
+    ms_regression = ss_regression / k
+    ms_residual = ss_residual / (n - k - 1)
+    
+    # F-статистика
+    f_statistic = ms_regression / ms_residual if ms_residual != 0 else 0
+    
+    # Стандартные ошибки коэффициентов
+    print(f"Уравнение регрессии: {model.get_equation()}")
+    print(f"\nОбщая сумма квадратов (SST): {ss_total:.4f}")
+    print(f"Объясненная сумма квадратов (SSR): {ss_regression:.4f}")
+    print(f"Остаточная сумма квадратов (SSE): {ss_residual:.4f}")
+    print(f"F-статистика: {f_statistic:.4f}")
+    
+    # Коэффициенты детерминации
+    r2 = r_squared(predictions, targets)
+    r2_adj = 1 - (1 - r2) * (n - 1) / (n - k - 1) if n > k + 1 else 0
+    
+    print(f"\nКоэффициент детерминации R²: {r2:.4f}")
+    print(f"Скорректированный R²: {r2_adj:.4f}")
+    
+    # Анализ коэффициента регрессии
+    print("\nАНАЛИЗ КОЭФФИЦИЕНТОВ:")
+    for i in range(model.features_num):
+        factor_name = "Население (X1)"
+        print(f"{factor_name}: коэффициент = {model.weights[i]:.4f}")
+
+def plot_results(targets, predictions, errors_history, r2_history, X, Y):
+    """Визуализация результатов"""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+    # График 1: Фактические vs предсказанные значения
+    axes[0, 0].scatter(targets, predictions, alpha=0.7)
+    axes[0, 0].plot([min(targets), max(targets)], [min(targets), max(targets)], 
+                   'r--', label='Идеальная линия')
+    axes[0, 0].set_xlabel('Фактические значения Y (преступления)')
+    axes[0, 0].set_ylabel('Предсказанные значения Y')
+    axes[0, 0].set_title('Фактические vs Предсказанные значения преступлений')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # График 2: Ошибки по эпохам
+    axes[0, 1].plot(errors_history, 'b-', linewidth=2)
+    axes[0, 1].set_xlabel('Эпоха')
+    axes[0, 1].set_ylabel('MSE')
+    axes[0, 1].set_title('Сходимость MSE')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].set_yscale('log')
+    
+    # График 3: R² по эпохам
+    axes[1, 0].plot(r2_history, 'g-', linewidth=2)
+    axes[1, 0].set_xlabel('Эпоха')
+    axes[1, 0].set_ylabel('R²')
+    axes[1, 0].set_title('Изменение коэффициента детерминации R²')
+    axes[1, 0].grid(True, alpha=0.3)
+    
+    # График 4: Остатки
+    residuals = [t - p for t, p in zip(targets, predictions)]
+    axes[1, 1].scatter(predictions, residuals, alpha=0.7)
+    axes[1, 1].axhline(y=0, color='r', linestyle='--')
+    axes[1, 1].set_xlabel('Предсказанные значения преступлений')
+    axes[1, 1].set_ylabel('Остатки')
+    axes[1, 1].set_title('Анализ остатков модели')
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+def main():
+    # Данные из файла Salakhov.csv
+    # Формат: Y (преступления); X1 (население)
+    data = [
+        [12, 70000],  # Y; X1
+        [46, 41000],
+        [89, 84000],
+        [43, 48000],
+        [23, 26000],
+        [54, 61000],
+        [67, 71000],
+        [97, 99000],
+        [12, 17000],
+        [46, 52000],
+        [65, 70000],
+        [17, 22000],
+        [19, 24000],
+        [92, 97000],
+        [31, 39000],
+        [76, 81000],
+        [14, 17000],
+        [34, 39000],
+        [78, 82000],
+        [41, 46000],
+        [38, 40000],
+        [61, 68000],
+        [87, 89000],
+        [75, 54300]
+    ]
+    
+    # Разделение данных на переменные
+    Y = [row[0] for row in data]      # Первый столбец - количество преступлений (зависимая переменная)
+    X = [row[1] for row in data]      # Второй столбец - население (независимая переменная)
+    
+    print("АНАЛИЗ ПРОСТОЙ ЛИНЕЙНОЙ РЕГРЕССИИ: ПРЕСТУПЛЕНИЯ vs НАСЕЛЕНИЕ")
+    print("="*60)
+    print(f"Количество наблюдений: {len(Y)}")
+    print(f"Y (количество преступлений): среднее = {np.mean(Y):.2f}, std = {np.std(Y):.2f}")
+    print(f"X1 (население): среднее = {np.mean(X):.2f}, std = {np.std(X):.2f}")
+    
+    # Проверка на наличие корреляции
+    correlation = np.corrcoef(X, Y)[0, 1]
+    print(f"\nКорреляция между населением и количеством преступлений: {correlation:.4f}")
+    
+    if correlation > 0.7:
+        print("Сильная положительная корреляция")
+    elif correlation > 0.3:
+        print("Умеренная положительная корреляция")
+    elif correlation > -0.3:
+        print("Слабая корреляция")
+    elif correlation > -0.7:
+        print("Умеренная отрицательная корреляция")
+    else:
+        print("Сильная отрицательная корреляция")
+    
+    # Нормализация данных (рекомендуется для градиентного спуска)
+    Y_norm = normalize_data(Y)
+    X_norm = normalize_data(X)
+    
+    # Подготовка данных для обучения (одна переменная - население)
+    inputs = [[x] for x in X_norm]  # Обертываем в список для совместимости
+    targets = Y_norm
+    
+    print("\n" + "="*60)
+    print("НАЧАЛО ОБУЧЕНИЯ МОДЕЛИ")
+    print("="*60)
+    
+    # Создание и обучение модели (одна признаковая переменная)
+    model = LinearRegression(features_num=1)
+    errors_history, r2_history = model.fit(
+        inputs, 
+        targets, 
+        epochs=2000, 
+        lr=0.05,  # меньшая скорость обучения для стабильности
+        verbose=True
+    )
+    
+    # Прогнозирование
+    predictions_norm = model.predict(inputs)
+    
+    # Денормализация для интерпретации
+    Y_mean = np.mean(Y)
+    Y_std = np.std(Y)
+    predictions = [p * Y_std + Y_mean for p in predictions_norm]
+    
+    print("\n" + "="*60)
+    print("РЕЗУЛЬТАТЫ МОДЕЛИ")
+    print("="*60)
+    
+    # Анализ значимости модели
+    analyze_significance(model, inputs, targets)
+    
+    # Вывод первых нескольких прогнозов
+    print("\nПРИМЕРЫ ПРОГНОЗОВ:")
+    print("Индекс | Население (X1) | Фактические преступления (Y) | Прогноз | Ошибка")
+    for i in range(min(10, len(Y))):
+        error = Y[i] - predictions[i]
+        print(f"{i:6d} | {X[i]:13.0f} | {Y[i]:27.0f} | {predictions[i]:7.1f} | {error:6.1f}")
+    
+    # Итоговая статистика
+    final_mse = mse(predictions, Y)
+    final_r2 = r_squared(predictions, Y)
+    
+    print(f"\nИТОГОВАЯ СТАТИСТИКА:")
+    print(f"Среднеквадратичная ошибка (MSE): {final_mse:.4f}")
+    print(f"Корень из MSE (RMSE): {np.sqrt(final_mse):.4f}")
+    print(f"Коэффициент детерминации R²: {final_r2:.4f}")
+    
+    # Вывод уравнений регрессии
+    print("\n" + "="*60)
+    print("УРАВНЕНИЯ РЕГРЕССИИ:")
+    print("="*60)
+    print("В нормализованных данных:")
+    print(model.get_equation())
+    
+    # Расчет уравнения в исходных данных
+    print("\nВ исходных данных (точное преобразование):")
+    mean_Y = np.mean(Y)
+    std_Y = np.std(Y)
+    mean_X = np.mean(X)
+    std_X = np.std(X)
+    
+    # Преобразование коэффициентов из нормализованных в исходные
+    w0_norm = model.weights[-1]  # intercept в нормализованных данных
+    w1_norm = model.weights[0]   # коэффициент для X_norm
+    
+    # Преобразование в исходный масштаб
+    w1_original = w1_norm * (std_Y / std_X)
+    w0_original = mean_Y - w1_original * mean_X + w0_norm * std_Y
+    
+    print(f"Преступления = {w0_original:.4f} + {w1_original:.4f} * Население")
+    print(f"\nИнтерпретация:")
+    print(f"- Свободный член (intercept): {w0_original:.2f} - базовый уровень преступлений")
+    print(f"- Коэффициент при населении: {w1_original:.6f} - увеличение преступлений на 1 человека населения")
+    print(f"  или {w1_original*1000:.2f} дополнительных преступлений на 1000 человек населения")
+    
+    # Дополнительная визуализация: зависимость преступлений от населения
+    plt.figure(figsize=(10, 6))
+    
+    # Точки фактических данных
+    plt.scatter(X, Y, alpha=0.7, label='Фактические данные')
+    
+    # Линия регрессии
+    x_range = np.linspace(min(X), max(X), 100)
+    y_pred = [w0_original + w1_original * x for x in x_range]
+    plt.plot(x_range, y_pred, 'r-', linewidth=2, label='Линия регрессии')
+    
+    plt.xlabel('Население (X1)')
+    plt.ylabel('Количество преступлений (Y)')
+    plt.title('Зависимость количества преступлений от численности населения')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    
+    # Визуализация стандартных графиков
+    plot_results(Y, predictions, errors_history, r2_history, X, Y)
+    
+    # Анализ коэффициента эластичности
+    print("\n" + "="*60)
+    print("ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ:")
+    print("="*60)
+    
+    # Коэффициент эластичности
+    elasticity = w1_original * (mean_X / mean_Y)
+    print(f"Коэффициент эластичности: {elasticity:.4f}")
+    if elasticity > 1:
+        print("Преступления эластичны по населению (рост населения ведет к большему росту преступлений)")
+    elif elasticity > 0:
+        print("Преступления неэластичны по населению (рост населения ведет к меньшему росту преступлений)")
+    else:
+        print("Отрицательная эластичность")
+    
+    # Прогноз для некоторых значений населения
+    print("\nПРОГНОЗ ДЛЯ РАЗНЫХ ЗНАЧЕНИЙ НАСЕЛЕНИЯ:")
+    test_populations = [10000, 25000, 50000, 75000, 100000]
+    for pop in test_populations:
+        predicted_crimes = w0_original + w1_original * pop
+        print(f"Население {pop:6d}: прогнозируемое количество преступлений = {predicted_crimes:.1f}")
+    
+    print("\n" + "="*60)
+    print("ВЫВОДЫ И ИНТЕРПРЕТАЦИЯ:")
+    print("="*60)
+    print("1. Модель показывает зависимость количества преступлений от численности населения")
+    print(f"2. Корреляция между населением и преступлениями составляет {correlation:.4f}")
+    print(f"3. Коэффициент детерминации R² = {final_r2:.4f} означает, что")
+    print(f"   {final_r2*100:.1f}% вариации преступлений объясняется изменением численности населения")
+    print("4. Положительный коэффициент при населении означает, что с увеличением")
+    print("   численности населения количество преступлений также увеличивается")
+    print("5. Для улучшения модели можно:")
+    print("   - Добавить другие факторы (уровень безработицы, доход на душу населения и т.д.)")
+    print("   - Проверить наличие нелинейной зависимости")
+    print("   - Исследовать региональные особенности")
+
+if __name__ == '__main__':
+    main()
